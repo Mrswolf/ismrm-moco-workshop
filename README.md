@@ -1,4 +1,14 @@
 # Hands-on motion estimation and correction
+> *by swolf*:
+>
+> I tweak the notebook a little bit making it run more easily on local environments,
+>
+> using native python packages without the pain of compiling packages like gpuNufft or bart. 
+>
+> It's a workshop notebook about motion correction,
+>
+> and we should focus on the most important thing instead of these annoying compiling issues.
+
 **ISMRM Workshop on Motion Detection and Correction 2022**<br/>
 *Gastao Cruz and Thomas Kuestner*<br/>
 
