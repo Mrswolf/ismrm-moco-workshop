@@ -2,7 +2,8 @@ import numpy as np
 #import scipy.io as sio
 #import optopy.gpunufft as op
 #import pysap
-from mri.operators import NonCartesianFFT
+# from mri.operators import NonCartesianFFT
+from .padding import zpad
 
 
 def get_kpos(n_FE, n_spokes, RadProfOrder, start_angle):
@@ -131,7 +132,7 @@ def compute_radial_dcf(Kpos):
     return dcf.reshape((1, *dcf.shape))
 
 
-def prepare_radial(acc, nRead, nSlices=1):
+def prepare_radial(acc, nRead, nSlices=1, dtype=np.float32):
     """
     :param acc:         acceleration factor
     :param nRead:       number of readout steps
@@ -155,63 +156,63 @@ def prepare_radial(acc, nRead, nSlices=1):
     kpos = np.transpose(kpos[0, ...], (1, 0))
     #mask_rad = convert_locations_to_mask(kpos, (nRead, nRead))
     dcf = np.transpose(dcf[0, ...], (1, 0))
-    return kpos, dcf
+    return kpos.astype(dtype), dcf.astype(dtype)
 
 
-def subsample_radial(img_cart, smaps=None, acc=1, cphases=[0]):
-    # return radial subsampled image
+# def subsample_radial(img_cart, smaps=None, acc=1, cphases=[0]):
+#     # return radial subsampled image
 
-    # zero-pad to quadratic FOV
-    maxsize = np.amax(np.shape(img_cart)[0:2])
-    img_cart = zpad(img_cart, (maxsize, maxsize, np.shape(img_cart)[2], np.shape(img_cart)[3])).astype(np.complex64)
+#     # zero-pad to quadratic FOV
+#     maxsize = np.amax(np.shape(img_cart)[0:2])
+#     img_cart = zpad(img_cart, (maxsize, maxsize, np.shape(img_cart)[2], np.shape(img_cart)[3])).astype(np.complex64)
 
-    nyquist_spokes = np.round(np.pi / 2 * maxsize)
+#     nyquist_spokes = np.round(np.pi / 2 * maxsize)
 
-    if acc > 1:
-        n_spokes = int(np.round(nyquist_spokes / acc))
-    else:
-        n_spokes = int(nyquist_spokes)
+#     if acc > 1:
+#         n_spokes = int(np.round(nyquist_spokes / acc))
+#     else:
+#         n_spokes = int(nyquist_spokes)
 
-    golden_angle = 180 * 0.618034
-    if len(np.shape(img_cart) == 4):
-        img_cart = img_cart[:, :, :, np.newaxis, :]
+#     golden_angle = 180 * 0.618034
+#     if len(np.shape(img_cart) == 4):
+#         img_cart = img_cart[:, :, :, np.newaxis, :]
 
-    nRO, _, nSlices, n_phases_img, ncoils = np.shape(img_cart)
-    n_phases = len(cphases)
-    if np.any(np.asarray(cphases) > n_phases_img):
-        raise ValueError
+#     nRO, _, nSlices, n_phases_img, ncoils = np.shape(img_cart)
+#     n_phases = len(cphases)
+#     if np.any(np.asarray(cphases) > n_phases_img):
+#         raise ValueError
 
-    img = np.transpose(img_cart, (3, 4, 2, 0, 1)).copy().view()  # phase must be first to be c-contiguous
+#     img = np.transpose(img_cart, (3, 4, 2, 0, 1)).copy().view()  # phase must be first to be c-contiguous
 
-    startangle = 0
-    img_rad = []
-    if smaps is None:
-        csm = np.ones((1, maxsize, maxsize))
-    for ipha in cphases:  # range(n_phases):
-        kpos = get_kpos(maxsize, n_spokes, 'golden', startangle)
-        # kpos = generateRadialTrajectory(int(maxsize), int(n_spokes))
-        # kpos_idx = np.transpose(kpos_idx,(0,2,1))
+#     startangle = 0
+#     img_rad = []
+#     if smaps is None:
+#         csm = np.ones((1, maxsize, maxsize))
+#     for ipha in cphases:  # range(n_phases):
+#         kpos = get_kpos(maxsize, n_spokes, 'golden', startangle)
+#         # kpos = generateRadialTrajectory(int(maxsize), int(n_spokes))
+#         # kpos_idx = np.transpose(kpos_idx,(0,2,1))
 
-        # kpos_idx = kpos_idx[np.newaxis, :, :, :]  # phases x 2 x nSpokes x nRO -> required input of dcf
-        # kpos.append(kpos_idx)
+#         # kpos_idx = kpos_idx[np.newaxis, :, :, :]  # phases x 2 x nSpokes x nRO -> required input of dcf
+#         # kpos.append(kpos_idx)
 
-        dcf = compute_radial_dcf(kpos)
-        dcf = dcf * nRO * np.pi
+#         dcf = compute_radial_dcf(kpos)
+#         dcf = dcf * nRO * np.pi
 
-        kpos = np.tile(kpos.reshape(1, -1, maxsize * n_spokes), (nSlices, 1, 1))
-        dcf = np.tile(dcf.reshape(1, 1, maxsize * n_spokes) / np.max(dcf), (nSlices, 1, 1))
+#         kpos = np.tile(kpos.reshape(1, -1, maxsize * n_spokes), (nSlices, 1, 1))
+#         dcf = np.tile(dcf.reshape(1, 1, maxsize * n_spokes) / np.max(dcf), (nSlices, 1, 1))
 
-        # nufft = op.GpuNufft(img_dim=maxsize, osf=1, kernel_width=3, sector_width=5)
-        # nufft.setDcf(dcf.astype(np.float32))  # nBatch x 1 x nRO * nSpokes
-        # nufft.setTraj(kpos.astype(np.float32))  # nBatch x 2 x nRO * nSpokes
-        # nufft.setCsm(csm.astype(np.complex64))  # nCoils x nRO x nRO
-        # out = nufft.adjoint(nufft.forward(img[ipha, ...].astype(np.complex64)))
-        nufft = NonCartesianFFT(samples=kpos, shape=np.shape(img), n_coils=np.shape(csm)[0], density_comp=dcf,
-                                smaps=csm)
-        out = nufft.op(img)
-        img_rad.append(out)
+#         # nufft = op.GpuNufft(img_dim=maxsize, osf=1, kernel_width=3, sector_width=5)
+#         # nufft.setDcf(dcf.astype(np.float32))  # nBatch x 1 x nRO * nSpokes
+#         # nufft.setTraj(kpos.astype(np.float32))  # nBatch x 2 x nRO * nSpokes
+#         # nufft.setCsm(csm.astype(np.complex64))  # nCoils x nRO x nRO
+#         # out = nufft.adjoint(nufft.forward(img[ipha, ...].astype(np.complex64)))
+#         nufft = NonCartesianFFT(samples=kpos, shape=np.shape(img), n_coils=np.shape(csm)[0], density_comp=dcf,
+#                                 smaps=csm)
+#         out = nufft.op(img)
+#         img_rad.append(out)
 
-        startangle += golden_angle
+#         startangle += golden_angle
 
-    img_rad = np.transpose(np.ascontiguousarray(img_rad), (2, 3, 1, 0))  # nRO x nRO x nSlices x cPhases
-    return img_rad
+#     img_rad = np.transpose(np.ascontiguousarray(img_rad), (2, 3, 1, 0))  # nRO x nRO x nSlices x cPhases
+#     return img_rad

@@ -1,7 +1,41 @@
 import numpy as np
-from utils.mri import mriForwardOp
+from .mri import mriForwardOp
 import SimpleITK as sitk
 import matplotlib.pyplot as plt
+from mrinufft.operators.interfaces.finufft import MRIfinufft
+
+def simulate_motion_radial(img_rad, smaps, mask, dcf, p):
+    # img_cc      motion-free coil-combined image (quadrativ FOV)
+    # smaps       coil sensitivity maps: [nCoils, nRead, nRead]
+    # mask        radial sampling mask
+    # dcf         density compensation function
+    # p           a) affine motion parameters (constant over time), 1x6
+    #             b) affine motion course (time-dependent or time-constant), nPE x 6
+    #             np.abs(p[:, :5]) > 0 = mask_motion; time points of phase-encoding steps
+    #             at which motion parameters > 0 are defined, i.e. motion is happening
+
+    nRead = np.shape(img_rad)[0]
+    nufft = MRIfinufft(mask, (nRead, nRead), n_coils=np.shape(smaps)[0], density=dcf, smaps=smaps)
+    # nufft = NonCartesianFFT(samples=mask, shape=[nRead, nRead], n_coils=np.shape(smaps)[0], density_comp=dcf, smaps=smaps, implementation='gpuNUFFT')
+    kspace = nufft.op(img_rad)
+    p = np.asarray(p)
+    tmp = np.unique(p, axis=0)
+    if len(np.shape(p)) == 1:
+        mask_motion = np.ones_like(kspace)
+    else:
+        mask_motion = np.abs(np.sum(p[:, :5], axis=1)) > 0
+        mask_motion = np.tile(mask_motion[np.newaxis, :], (np.shape(kspace)[0], 1))
+
+    if len(np.shape(p)) == 1 or np.shape(tmp[~np.all(tmp == 0, axis=1)])[0] == 1:  # constant motion over time
+        if len(np.shape(p)) != 1:
+            p = np.squeeze(tmp[~np.all(tmp == 0, axis=1)])
+        kspace_motion = nufft.op(transform_img(img_rad, p))
+        return kspace * ( 1 -mask_motion) + kspace_motion * mask_motion, mask_motion
+    else:  # time-dependent motion
+        kspace_aff = np.zeros_like(kspace)
+        for ky in np.arange(np.shape(img_rad)[1]):
+            kspace_aff[:, ky, :] = nufft.op(transform_img(img_rad, p[ky, :]))[:, ky, :]
+        return kspace_aff, mask_motion
 
 
 def simulate_motion(img_cc, smaps, mask, p):
