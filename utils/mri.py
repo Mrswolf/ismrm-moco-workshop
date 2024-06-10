@@ -77,6 +77,8 @@ def BatchAdjointOp(kspace, masks, smaps, motions, use_optox=False):
     return np.sum(image_out,2)
 
 
+
+
 # def BatchGPUNUFFTForwardOp(image, traj, csm, dcf, motions, nufft=None, use_optox=False):
 #     Nx = np.shape(image)[0]
 #     Ny = np.shape(image)[1]
@@ -239,125 +241,78 @@ def BatchAdjointOp(kspace, masks, smaps, motions, use_optox=False):
 #             add_channel_dim=False)
 
 
-# def iterativeSENSE(kspace, smap=None, mask=None, noisy=None, dcf=None, flow=None,
-#                      fwdop=MulticoilForwardOp, adjop=MulticoilAdjointOp,
-#                      add_batch_dim=True, max_iter=10, tol=1e-12, weight_init=1.0, weight_scale=1.0, use_optox=False):
-#     # kspace        raw k-space data as [X, Y, coils] which will be converted to:
-#     #               Cartesian + no-motion compensation: [batch, coils, X, Y] or [batch, coils, X, Y, Z] or [batch, coils, time, X, Y] or [batch, coils, time, X, Y, Z] (numpy array)
-#     #               Cartesian + motion-compensation / non-Cartesian + no-motion/motion-comp.: [batch, X, Y, coils]
-#     # smap          coil sensitivity maps with same shape as kspace (or singleton dimension for time) (numpy array)
-#     # mask          subsampling including/excluding soft-weights with same shape as kspace (no-motion-comp) and shape: X, Y, coils, T (motion-comp) (numpy array)
-#     # noisy         initialiaztion for reconstructed image, if None it is created from A^H(kspace) (numpy array)
-#     # dcf           density compensation function (only non-Cartesian) (numpy array)
-#     # flow          flow field (numpy array)
-#     # fwdop         forward operator A
-#     # adjop         adjoint operator A^H
-#     # add_batch_dim automatically append batch dimension for GPU execution
-#     # max_iter      maximum number of iterations for CG/iterative SENSE
-#     # tol           tolerance for stopping condition for CG/iterative SENSE
-#     # weight_init   initial weighting for lambda regularization parameter
-#     # weight_scale  scaling factor for lambda regularization parameter
-#     # return:       reconstructed image (numpy array)
+def iterativeSENSE(kspace, smap=None, mask=None, noisy=None, dcf=None, flow=None,
+                     fwdop=None, adjop=None,
+                     add_batch_dim=True, max_iter=10, tol=1e-12, weight_init=1.0, weight_scale=1.0):
+    # kspace        raw k-space data as [X, Y, coils] which will be converted to:
+    #               Cartesian + no-motion compensation: [batch, coils, X, Y] or [batch, coils, X, Y, Z] or [batch, coils, time, X, Y] or [batch, coils, time, X, Y, Z] (numpy array)
+    #               Cartesian + motion-compensation / non-Cartesian + no-motion/motion-comp.: [batch, X, Y, coils]
+    # smap          coil sensitivity maps with same shape as kspace (or singleton dimension for time) (numpy array)
+    # mask          subsampling including/excluding soft-weights with same shape as kspace (no-motion-comp) and shape: X, Y, coils, T (motion-comp) (numpy array)
+    # noisy         initialiaztion for reconstructed image, if None it is created from A^H(kspace) (numpy array)
+    # dcf           density compensation function (only non-Cartesian) (numpy array)
+    # flow          flow field (numpy array)
+    # fwdop         forward operator A
+    # adjop         adjoint operator A^H
+    # add_batch_dim automatically append batch dimension for GPU execution
+    # max_iter      maximum number of iterations for CG/iterative SENSE
+    # tol           tolerance for stopping condition for CG/iterative SENSE
+    # weight_init   initial weighting for lambda regularization parameter
+    # weight_scale  scaling factor for lambda regularization parameter
+    # return:       reconstructed image (numpy array)
 
-#     if dcf is not None:
-#         bradial = True
-#     else:
-#         bradial = False
+    if dcf is not None:
+        bradial = True
+    else:
+        bradial = False
 
-#     if flow is not None:
-#         motioncomp = True
-#     else:
-#         motioncomp = False
+    if flow is not None:
+        motioncomp = True
+    else:
+        motioncomp = False
 
-#     if bradial:
-#         Nx, Nspokes = np.shape(kspace)
-#         Ny = Nx
-#         Nc = 1
-#     else:
-#         Nx, Ny, Nc = np.shape(kspace)
-#     if motioncomp:
-#         Nt = np.shape(flow)[-1]
-#     else:
-#         Nt = 1
-#     # Forward and Adjoint operators
-#     A = fwdop
-#     AH = adjop
+    if bradial:
+        Nc, NSpokes, Nx = np.shape(kspace)
+        Ny = Nx
+    else:
+        Nx, Ny, Nc = np.shape(kspace)
+    
+    if motioncomp:
+        Nt = np.shape(flow)[-1]
+    else:
+        Nt = 1
+    # Forward and Adjoint operators
+    A = fwdop
+    AH = adjop
 
-#     if use_optox:
-#         if type(kspace).__module__ == np.__name__:
-#             if not bradial and not motioncomp:
-#                 kspace = np.transpose(kspace, (2, 0, 1))
-#             kspace = numpy2tensor(kspace, add_batch_dim=add_batch_dim, add_channel_dim=False)
-#         if smap is not None and type(smap).__module__ == np.__name__:
-#             if not bradial and not motioncomp:
-#                 smap = np.transpose(smap, (2, 0, 1))
-#             smap = numpy2tensor(smap, add_batch_dim=add_batch_dim, add_channel_dim=False)
-#         if mask is not None and type(mask).__module__ == np.__name__:
-#             mask = numpy2tensor(mask, add_batch_dim=add_batch_dim, add_channel_dim=False, dtype=tf.float32)
-#         else:
-#             if motioncomp:
-#                 mask = tf.ones([Nx, Ny, Nc, Nt], dtype=tf.float32)
-#             else:
-#                 mask = tf.ones(tf.shape(kspace), dtype=tf.float32)
-#         if dcf is not None and type(dcf).__module__ == np.__name__:
-#             dcf = numpy2tensor(dcf, add_batch_dim=add_batch_dim, add_channel_dim=False)
-#         if flow is not None and type(flow).__module__ == np.__name__:
-#             flow = numpy2tensor(flow, add_batch_dim=add_batch_dim, add_channel_dim=False, dtype=tf.float32)
+    if mask is None:
+        if motioncomp:
+            mask = np.ones([Nx, Ny, Nc, Nt], dtype=np.float32)
+        else:
+            mask = np.ones(np.shape(kspace), dtype=np.float32)
 
-#         if noisy is None:
-#             if bradial:
-#                 if motioncomp:
-#                     noisy = AH(kspace, mask, smap, dcf, flow)
-#                 else:
-#                     noisy = AH(kspace, mask, smap, dcf)
-#             else:
-#                 if motioncomp:
-#                     noisy = AH(kspace, mask, smap, flow)
-#                 else:
-#                     noisy = AH(kspace, mask, smap)
-#         elif noisy is not None and type(noisy).__module__ == np.__name__:
-#             noisy = numpy2tensor(noisy, add_batch_dim=add_batch_dim, add_channel_dim=False)
+    if noisy is None:
+        if bradial:
+            if motioncomp:
+                noisy = AH(kspace, mask, smap, flow)
+            else:
+                noisy = AH(kspace, mask, smap)
+        else:
+            if motioncomp:
+                noisy = AH(kspace, mask, smap, flow)
+            else:
+                noisy = AH(kspace, mask, smap)
 
-#         model = DCPM(A, AH, weight_init=weight_init, weight_scale=weight_scale, max_iter=max_iter, tol=tol)
-#         if bradial:  # non-Cartesian
-#             if motioncomp:
-#                 return np.squeeze(model([noisy, kspace, smap, mask, dcf, flow]).numpy())
-#             else:
-#                 return np.squeeze(model([noisy, kspace, smap, mask, dcf]).numpy())
-#         else:  # Cartesian
-#             if motioncomp:
-#                 return np.squeeze(model([noisy, kspace, mask, smap, flow]).numpy())
-#             else:
-#                 return np.squeeze(model([noisy, kspace, mask, smap]).numpy())
-#     else:
-#         if mask is None:
-#             if motioncomp:
-#                 mask = np.ones([Nx, Ny, Nc, Nt], dtype=np.float32)
-#             else:
-#                 mask = np.ones(np.shape(kspace), dtype=np.float32)
-
-#         if noisy is None:
-#             if bradial:
-#                 if motioncomp:
-#                     noisy = AH(kspace, mask, smap, dcf, flow)
-#                 else:
-#                     noisy = AH(kspace, mask, smap, dcf)
-#             else:
-#                 if motioncomp:
-#                     noisy = AH(kspace, mask, smap, flow)
-#                 else:
-#                     noisy = AH(kspace, mask, smap)
-
-#         if bradial:  # non-Cartesian
-#             if motioncomp:
-#                 return np.squeeze(conjugate_gradient([noisy, kspace, smap, mask, dcf, flow], A, AH, max_iter, tol))
-#             else:
-#                 return np.squeeze(conjugate_gradient([noisy, kspace, smap, mask, dcf], A, AH, max_iter, tol))
-#         else:  # Cartesian
-#             if motioncomp:
-#                 return np.squeeze(conjugate_gradient([noisy, kspace, mask, smap, flow], A, AH, max_iter, tol))
-#             else:
-#                 return np.squeeze(conjugate_gradient([noisy, kspace, mask, smap], A, AH, max_iter, tol))
+    if bradial:  # non-Cartesian
+        if motioncomp:
+            return np.squeeze(conjugate_gradient([noisy, kspace, mask, smap, flow], A, AH, max_iter, tol))
+        else:
+            return np.squeeze(conjugate_gradient([noisy, kspace, mask, smap], A, AH, max_iter, tol))
+    else:  # Cartesian
+        if motioncomp:
+            return np.squeeze(conjugate_gradient([noisy, kspace, mask, smap, flow], A, AH, max_iter, tol))
+        else:
+            return np.squeeze(conjugate_gradient([noisy, kspace, mask, smap], A, AH, max_iter, tol))
 
 # Conjugate gradient solver for linear inverse problem
 def conjugate_gradient(inputs, A, AH, max_iter=10, tol=1e-12):
@@ -372,9 +327,10 @@ def conjugate_gradient(inputs, A, AH, max_iter=10, tol=1e-12):
 
     x = np.zeros_like(rhs)
     i, r, p = 0, rhs, rhs
-    rTr = np.real(np.sum(np.conj(r) * r))
+    rTr0 = np.real(np.sum(np.conj(r) * r))
+    rTr = rTr0
     num_iter = 0
-    while (num_iter < max_iter) and (rTr > tol):
+    while (num_iter < max_iter) and (rTr / rTr0 > tol):
         Ap = M(p)
         alpha = rTr / np.real(np.sum(np.conj(p) * Ap))
         x = x + p * alpha
