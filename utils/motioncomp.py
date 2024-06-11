@@ -1,6 +1,7 @@
 import numpy as np
 from scipy.sparse import csr_matrix
 import math
+from joblib import Parallel, delayed
 
 #####################
 # Auxiliary functions
@@ -34,46 +35,58 @@ def lin_index(x,y,Nx):
 def get_sparse_motion_matrix(flow_field):
 # creates a sparse motion matrix corresponding to the motion in the flow field
 # assuming linear interpolation
+  def __get_index_and_value(x, y, Nx, Ny):
+    ux = flow_field[x,y,0]
+    uy = flow_field[x,y,1]
+    y1 = math.floor(y+uy)
+    y2 = math.floor(y+uy+1)
+    x1 = math.floor(x+ux)
+    x2 = math.floor(x+ux+1)
+    # interpolants for linear interpolation
+    wx = ux-math.floor(ux)
+    wy = uy-math.floor(uy)
+    w11 = bound_weight((1-wx)*(1-wy),x1,y1,Nx,Ny)
+    w12 = bound_weight((1-wx)*wy,x1,y2,Nx,Ny)
+    w21 = bound_weight(wx*(1-wy),x2,y1,Nx,Ny)
+    w22 = bound_weight(wx*wy,x2,y2,Nx,Ny)
+    # avoiding out of FOV issues
+    y1 = bound_index(y1,Ny)
+    y2 = bound_index(y2,Ny)
+    x1 = bound_index(x1,Nx)
+    x2 = bound_index(x2,Nx)
+    # loading sparse matrix indexes
+    li = int(lin_index(x,y,Nx))
+    x1y1 = int(lin_index(x1,y1,Nx))
+    x1y2 = int(lin_index(x1,y2,Nx))
+    x2y1 = int(lin_index(x2,y1,Nx))
+    x2y2 = int(lin_index(x2,y2,Nx))
+    row, col, val = [], [], []
+    # assigning weights to sparse matrix
+    if w11 != 0:
+      row.append(li)
+      col.append(x1y1)
+      val.append(w11)
+    if w12 != 0:
+      row.append(li)
+      col.append(x1y2)
+      val.append(w12)
+    if w21 != 0:
+      row.append(li)
+      col.append(x2y1)
+      val.append(w21)
+    if w22 != 0:
+      row.append(li)
+      col.append(x2y2)
+      val.append(w22)
+    return (np.array(row), np.array(col), np.array(val))
+
   Ny = np.shape(flow_field)[1]
   Nx = np.shape(flow_field)[0]
-  sparse_mot = csr_matrix((Ny*Nx,Ny*Nx))
 
-  for y in range(np.shape(flow_field)[1]):
-    for x in range(np.shape(flow_field)[0]):
-      # cartesian interpolant coordinates
-      ux = flow_field[x,y,0]
-      uy = flow_field[x,y,1]
-      y1 = math.floor(y+uy)
-      y2 = math.floor(y+uy+1)
-      x1 = math.floor(x+ux)
-      x2 = math.floor(x+ux+1)
-      # interpolants for linear interpolation
-      wx = ux-math.floor(ux)
-      wy = uy-math.floor(uy)
-      w11 = bound_weight((1-wx)*(1-wy),x1,y1,Nx,Ny)
-      w12 = bound_weight((1-wx)*wy,x1,y2,Nx,Ny)
-      w21 = bound_weight(wx*(1-wy),x2,y1,Nx,Ny)
-      w22 = bound_weight(wx*wy,x2,y2,Nx,Ny)
-      # avoiding out of FOV issues
-      y1 = bound_index(y1,Ny)
-      y2 = bound_index(y2,Ny)
-      x1 = bound_index(x1,Nx)
-      x2 = bound_index(x2,Nx)
-      # loading sparse matrix indexes
-      li = int(lin_index(x,y,Nx))
-      x1y1 = int(lin_index(x1,y1,Nx))
-      x1y2 = int(lin_index(x1,y2,Nx))
-      x2y1 = int(lin_index(x2,y1,Nx))
-      x2y2 = int(lin_index(x2,y2,Nx))
-      # assigning weights to sparse matrix
-      if w11 != 0:
-        sparse_mot[li,x1y1] = w11
-      if w12 != 0:
-        sparse_mot[li,x1y2] = w12
-      if w21 != 0:
-        sparse_mot[li,x2y1] = w21
-      if w22 != 0:
-        sparse_mot[li,x2y2] = w22
+  r = Parallel(n_jobs=-1)(delayed(__get_index_and_value)(x, y, Nx, Ny) for x in range(np.shape(flow_field)[0]) for y in range(np.shape(flow_field)[1]))
+  rows, cols, vals = zip(*r)
+  rows, cols, vals = np.concatenate(rows), np.concatenate(cols), np.concatenate(vals)
+  sparse_mot = csr_matrix((vals, (rows, cols)), shape=(Ny*Nx,Ny*Nx))
 
   return sparse_mot
 
