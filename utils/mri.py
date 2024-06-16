@@ -241,7 +241,7 @@ def BatchAdjointOp(kspace, masks, smaps, motions, use_optox=False):
 #             add_channel_dim=False)
 
 
-def iterativeSENSE(kspace, smap=None, mask=None, noisy=None, dcf=None, flow=None,
+def iterativeSENSE(kspace, kpos=None, smap=None, mask=None, noisy=None, dcf=None, flow=None,
                      fwdop=None, adjop=None,
                      add_batch_dim=True, max_iter=10, tol=1e-12, weight_init=1.0, weight_scale=1.0):
     # kspace        raw k-space data as [X, Y, coils] which will be converted to:
@@ -276,9 +276,12 @@ def iterativeSENSE(kspace, smap=None, mask=None, noisy=None, dcf=None, flow=None
         Ny = Nx
     else:
         Nx, Ny, Nc = np.shape(kspace)
-    
+
     if motioncomp:
-        Nt = np.shape(flow)[-1]
+        if bradial:
+            Nt = np.shape(flow)[0] // np.shape(flow)[1]
+        else:
+            Nt = np.shape(flow)[-1]
     else:
         Nt = 1
     # Forward and Adjoint operators
@@ -294,9 +297,9 @@ def iterativeSENSE(kspace, smap=None, mask=None, noisy=None, dcf=None, flow=None
     if noisy is None:
         if bradial:
             if motioncomp:
-                noisy = AH(kspace, mask, smap, flow)
+                noisy = AH(kspace, kpos, smap, dcf, flow)
             else:
-                noisy = AH(kspace, mask, smap)
+                noisy = AH(kspace, kpos, smap, dcf)
         else:
             if motioncomp:
                 noisy = AH(kspace, mask, smap, flow)
@@ -305,9 +308,9 @@ def iterativeSENSE(kspace, smap=None, mask=None, noisy=None, dcf=None, flow=None
 
     if bradial:  # non-Cartesian
         if motioncomp:
-            return np.squeeze(conjugate_gradient([noisy, kspace, mask, smap, flow], A, AH, max_iter, tol))
+            return np.squeeze(conjugate_gradient([noisy, kspace, kpos, smap, dcf, flow], A, AH, max_iter, tol))
         else:
-            return np.squeeze(conjugate_gradient([noisy, kspace, mask, smap], A, AH, max_iter, tol))
+            return np.squeeze(conjugate_gradient([noisy, kspace, kpos, smap, dcf], A, AH, max_iter, tol))
     else:  # Cartesian
         if motioncomp:
             return np.squeeze(conjugate_gradient([noisy, kspace, mask, smap, flow], A, AH, max_iter, tol))
